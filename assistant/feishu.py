@@ -35,6 +35,8 @@ class FeishuSender:
                 data = request_json("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
                                     "POST", {"app_id": self.app_id, "app_secret": self.secret})
                 if data.get("code", 0) != 0:
+                    if data.get('code') == 21001:
+                        raise RuntimeError('飞书平台策略拒绝访问 code=21001，请通过飞书客服核查账号和应用的访问资格')
                     raise RuntimeError(f"飞书鉴权失败 code={data.get('code')}")
                 self.token = data["tenant_access_token"]
                 self.expires = time.time() + data["expire"] - 120
@@ -82,7 +84,8 @@ def run(config: Config, discover=False):
                 return
             engine.receive(message.message_id, open_id, message.chat_id, text)
         except Exception as error:
-            print("处理消息失败：" + type(error).__name__, flush=True)
+            detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+            print("处理消息失败：" + detail, flush=True)
 
     handler = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(on_message).build()
     sdk_logger.addFilter(SafeConnectionLog())

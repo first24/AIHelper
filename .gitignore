@@ -5,3 +5,4 @@ __pycache__/
 data/
 demo-report.json
 demo-report.md
+feishu-diagnostic.json
