@@ -1,6 +1,6 @@
 # 继续真实联调
 
-当前进度：代码已发布至 [first24/AIHelper](https://github.com/first24/AIHelper)，助理服务测试、本地错误复现和修复演练通过，真实飞书收发已验证并启动正式模式。模型已切换至 DeepSeek，首个真实修复任务待配置 DeepSeek 密钥后验收。
+当前进度：2026-11-10 已完成飞书指令 → GitHub → DeepSeek 修复 → 独立测试 → 草稿 PR → 飞书完成通知的真实闭环。[PR #1](https://github.com/first24/AIHelper/pull/1) 及其 CI 均已验证，等待你审查。下方步骤保留用于在其他主机重新部署；当前主机已配置，无需重复填写凭证。
 
 ## 1. 飞书
 

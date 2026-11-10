@@ -1,5 +1,7 @@
 # 飞书个人代码助理：AIHelper
 
+已于 2026-11-10 完成首次真实端到端验收：[修复运行成功](https://github.com/first24/AIHelper/actions/runs/42840686176)、[草稿 PR #1](https://github.com/first24/AIHelper/pull/1) 已创建，PR CI 通过，飞书完成通知发送成功。此次由 DeepSeek 修复金额计算，独立验证通过 5 项业务测试及 15 项助理测试。
+
 实际验收场景：你在飞书私聊机器人发送 `/修复 演示`，助理触发 `first24/AIHelper` 的 GitHub Actions，Codex 执行器调用 DeepSeek 模型修复一个折扣金额计算错误，原始测试全部通过后推送修复分支，本机助理创建草稿 PR，并把 PR 链接回报到原飞书会话。你审查后手动合并。
 
 ```mermaid
