@@ -1,0 +1,19 @@
+name: Assistant service tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -v
+      # shop_tests intentionally fail on main until the first repair PR is merged.
+      - if: github.event_name == 'pull_request'
+        run: python -m unittest discover -s shop_tests -v

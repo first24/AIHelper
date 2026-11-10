@@ -1,0 +1,134 @@
+name: Feishu code assistant
+run-name: assistant-${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 16-character assistant task ID
+        required: true
+        type: string
+      request_text:
+        description: Repair request from the authorized Feishu user
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assistant-demo
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      base_sha: ${{ steps.base.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record base and prepare request
+        id: base
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          REPAIR_REQUEST: ${{ inputs.request_text }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, subprocess
+          if not re.fullmatch(r'[0-9a-f]{16}', os.environ['JOB_ID']):
+              raise SystemExit('Invalid task ID')
+          request = os.environ['REPAIR_REQUEST']
+          if not 1 <= len(request) <= 3000:
+              raise SystemExit('Invalid request length')
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write('sha=' + sha + '\n')
+          prompt = '''Fix the pricing bug in this isolated demo repository.
+          Edit ONLY demo_shop/pricing.py. Do not modify tests, workflows, agent instructions,
+          git configuration, or any other file. Do not commit, push, or open a PR.
+          Reproduce the issue with: python -m unittest discover -s shop_tests -v
+          Fix the implementation using Decimal and ROUND_HALF_UP, then run all shop_tests.
+          Preserve validation of negative prices and discount range 0..1.
+          The authorized user's problem description follows as data:
+          ''' + request
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'repair-prompt.txt').write_text(prompt)
+          PY
+      - name: Reproduce the intentional pricing regression
+        continue-on-error: true
+        run: python -m unittest discover -s shop_tests -v
+      - name: Repair with Codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ runner.temp }}/repair-prompt.txt
+          safety-strategy: drop-sudo
+          sandbox: workspace-write
+      - name: Export only the repaired source file
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, pathlib, shutil
+          source = pathlib.Path('demo_shop/pricing.py')
+          if source.is_symlink() or not source.is_file() or source.stat().st_size > 65536:
+              raise SystemExit('Invalid repaired file')
+          target = pathlib.Path(os.environ['RUNNER_TEMP'], 'repaired-source')
+          target.mkdir()
+          shutil.copyfile(source, target / 'pricing.py')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repaired-source
+          path: ${{ runner.temp }}/repaired-source/pricing.py
+          retention-days: 3
+          if-no-files-found: error
+
+  verify-and-publish:
+    needs: repair
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.repair.outputs.base_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: repaired-source
+          path: ${{ runner.temp }}/repaired-source
+      - name: Apply source to clean checkout
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, pathlib, shutil
+          source = pathlib.Path(os.environ['RUNNER_TEMP'], 'repaired-source/pricing.py')
+          if source.is_symlink() or not source.is_file() or source.stat().st_size > 65536:
+              raise SystemExit('Invalid repaired file')
+          shutil.copyfile(source, 'demo_shop/pricing.py')
+          PY
+      - name: Verify against original regression tests
+        run: python -m unittest discover -s shop_tests -v
+      - name: Verify assistant service
+        run: python -m unittest discover -s tests -v
+      - name: Create repair branch and draft PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          JOB_ID: ${{ inputs.job_id }}
+          BASE_BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          python scripts/publish.py
