@@ -5,16 +5,32 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 HELP = "指令：\n/修复 演示\n/修复 <问题描述>\n/状态 <任务编号>\n/帮助\n本示例只修复 demo_shop/pricing.py，成功后创建 PR。"
 DEMO_TASK = "修复订单折扣金额：19.99 元打 9 折应为 17.99，当前返回 18.99。金额使用 Decimal，保留两位小数，四舍五入。运行 shop_tests 全部测试。只修改 demo_shop/pricing.py。"
+
+
+def existing_git_token():
+    """Ask Git's configured credential helper; never print or persist its response."""
+    try:
+        result = subprocess.run(['git', 'credential', 'fill'],
+                                input='protocol=https\nhost=github.com\n\n', text=True,
+                                capture_output=True, timeout=30,
+                                env={**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GCM_INTERACTIVE': 'never'})
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    if result.returncode:
+        return ''
+    fields = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+    return fields.get('password', '')
 
 
 @dataclass(frozen=True)
@@ -51,12 +67,12 @@ class Config:
             raise ValueError("尚未配置：" + ", ".join(missing))
 
 
-def request_json(url, method="GET", body=None, headers=None):
+def request_json(url, method="GET", body=None, headers=None, opener=None):
     data = None if body is None else json.dumps(body).encode()
     req = Request(url, data=data, method=method,
                   headers={"Content-Type": "application/json", **(headers or {})})
     try:
-        with urlopen(req, timeout=25) as response:
+        with (opener.open(req, timeout=25) if opener else urlopen(req, timeout=25)) as response:
             raw = response.read()
             return json.loads(raw) if raw else None
     except HTTPError as error:
@@ -71,9 +87,17 @@ class GitHub:
         self.headers = {"Authorization": f"Bearer {config.token}",
                         "Accept": "application/vnd.github+json",
                         "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "AIHelper"}
+        proxy = os.getenv("GITHUB_PROXY", "")
+        if not proxy:
+            try:
+                proxy = subprocess.run(['git', 'config', '--get-urlmatch', 'http.proxy', self.root],
+                                       capture_output=True, text=True, timeout=5).stdout.strip()
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        self.opener = build_opener(ProxyHandler({'https': proxy})) if proxy else None
 
     def call(self, path, method="GET", body=None):
-        return request_json(self.root + path, method, body, self.headers)
+        return request_json(self.root + path, method, body, self.headers, self.opener)
 
     def check(self):
         repo = self.call("")
@@ -99,6 +123,14 @@ class GitHub:
         query = urlencode({"head": f"{owner}:assistant/{job['id']}", "base": self.config.ref, "state": "all"})
         pulls = self.call("/pulls?" + query)
         return pulls[0]["html_url"] if pulls else None
+
+    def create_pr(self, job, run):
+        result = self.call('/pulls', 'POST', {
+            'title': 'fix: 修复订单折扣金额计算',
+            'head': 'assistant/' + job['id'], 'base': self.config.ref, 'draft': True,
+            'body': f"修复订单折扣金额计算，使用原始回归测试验证。\n\n任务编号：{job['id']}\n"
+                    f"验证：业务回归及助理服务测试通过。\n执行记录：{run['html_url']}\n\n请审查后手动合并。"})
+        return result['html_url']
 
 
 class Store:
@@ -207,7 +239,9 @@ class Engine:
         if run:
             self.store.update(job["id"], run_id=run["id"], run_url=run["html_url"], status="running")
             if run["status"] == "completed":
-                pr = self.github.find_pr(job) if run["conclusion"] == "success" else None
+                pr = None
+                if run["conclusion"] == "success":
+                    pr = self.github.find_pr(job) or self.github.create_pr(job, run)
                 result = (f"任务 {job['id']}：修复完成，测试通过。\nPR：{pr}\n等待你审查合并。" if pr else
                           f"任务 {job['id']}：本次未产出已验证的 PR（{run['conclusion']}）。\n日志：{run['html_url']}")
                 self.store.update(job["id"], status="done" if pr else "failed", result=result)

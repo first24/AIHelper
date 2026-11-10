@@ -1,15 +1,15 @@
 # 飞书个人代码助理：AIHelper
 
-实际验收场景：你在飞书私聊机器人发送 `/修复 演示`，助理触发 `first24/AIHelper` 的 GitHub Actions，Codex 修复一个折扣金额计算错误，原始测试全部通过后创建草稿 PR，并把 PR 链接回报到原飞书会话。你审查后手动合并。
+实际验收场景：你在飞书私聊机器人发送 `/修复 演示`，助理触发 `first24/AIHelper` 的 GitHub Actions，Codex 修复一个折扣金额计算错误，原始测试全部通过后推送修复分支，本机助理创建草稿 PR，并把 PR 链接回报到原飞书会话。你审查后手动合并。
 
 ```mermaid
 flowchart LR
   A[飞书私聊 /修复 演示] -->|官方 SDK 长连接| B[本机 Python 助理]
   B -->|workflow_dispatch| C[GitHub Actions + Codex]
   C --> D[新运行器执行原始测试]
-  D -->|通过| E[分支 + 草稿 PR]
+  D -->|通过| E[修复分支]
   D -->|失败| F[保留日志并报告失败]
-  B -->|轮询任务和 PR| E
+  B -->|轮询完成后创建草稿 PR| E
   E --> B
   B -->|消息 API| A
 ```
@@ -23,11 +23,11 @@ flowchart LR
 在 GitHub 仓库中：
 
 1. Settings → Secrets and variables → Actions → New repository secret，添加 `OPENAI_API_KEY`。模型调用使用该 Key 对应的 API 账户；以该账户可用额度为准。
-2. Settings → Actions → General，启用 **Allow GitHub Actions to create and approve pull requests**。组织策略可能由管理员控制。工作流只创建草稿 PR，不执行批准或合并。
+2. 保持现有仓库权限设置即可。本方案由本机助理使用你的 GitHub 登录创建草稿 PR，无需开启 **Allow GitHub Actions to create and approve pull requests**。
 3. 允许运行本仓库引用的 Actions。确认 Actions 页能看到 **Feishu code assistant**。
-4. 创建一个仅选择本仓库的 fine-grained PAT，用于本机助理：**Actions: Read and write、Contents: Read、Pull requests: Read**。该 PAT 填入本机 `.env` 的 `GH_TOKEN`，无需放入仓库。
+4. 本机已有 Git Credential Manager 登录时，保持 `USE_GIT_LOGIN=true`、`GH_TOKEN` 留空，助理会通过 Git 凭证助手在进程内读取登录凭证，不打印或保存。也可创建一个仅选择本仓库的 fine-grained PAT：**Actions: Read and write、Contents: Read、Pull requests: Read and write**，填入本机 `.env` 的 `GH_TOKEN`。
 
-`OPENAI_API_KEY` 只配置在 GitHub Secrets；飞书 Secret 和本机 GitHub PAT 只保留在本机 `.env`。发布 PR 使用工作流自己的 `GITHUB_TOKEN`，无需再配置发布 PAT。
+`OPENAI_API_KEY` 只配置在 GitHub Secrets；飞书 Secret 和可选的本机 GitHub PAT 只保留在本机 `.env`。Actions 使用自己的 `GITHUB_TOKEN` 推送验证后的分支，本机助理使用已有 Git 登录或上述 PAT 创建草稿 PR。
 
 ## 2. 配置已有飞书应用
 
@@ -55,7 +55,11 @@ notepad .env
 
 若没有 `py` 命令，用 `python` 替换 `py -3`。建议 Python 3.12 或 3.13。
 
-在 `.env` 填写 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`GH_TOKEN`，仓库保持 `first24/AIHelper`。先留空 `ALLOWED_OPEN_IDS`。
+在 `.env` 填写 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`，仓库保持 `first24/AIHelper`。已登录 Git 的本机可保留 `USE_GIT_LOGIN=true`、`GH_TOKEN` 留空；否则填写上面的 PAT。先留空 `ALLOWED_OPEN_IDS`。
+
+也可运行 `powershell -ExecutionPolicy Bypass -File .\configure.ps1`，在本机交互填写；Secret 和 PAT 输入时不回显。脚本只为本项目生成 `.env`，不会更改系统执行策略。已有 `.env` 时会直接打开编辑器。
+
+GitHub API 自动沿用 Git 的 `http.proxy` 配置，也可以在 `.env` 设置 `GITHUB_PROXY`；该设置仅用于 GitHub API 请求。
 
 获取你的飞书 open_id：
 
@@ -80,7 +84,7 @@ notepad .env
 2. 收到任务编号；GitHub Actions 页出现标题 `assistant-<任务编号>` 的运行。
 3. 工作流先复现错误：`19.99 × 0.9` 应得 `17.99`，演示代码返回 `18.99`。
 4. Codex 修改 `demo_shop/pricing.py`。独立发布任务用干净的原始代码和原始测试验证，只接收修复后的那一个源文件。
-5. 5 项业务回归测试及助理服务测试通过，创建 `assistant/<任务编号>` 分支和草稿 PR。
+5. 5 项业务回归测试及助理服务测试通过，推送 `assistant/<任务编号>` 分支。本机助理检测到运行成功，使用你的 GitHub 身份创建草稿 PR。
 6. 飞书收到真实 PR 链接和“等待你审查合并”。这一步完成才算真实端到端验收。
 
 可用命令：
@@ -114,8 +118,8 @@ python -m assistant demo
 | GitHub HTTP 401/403 | PAT 是否有效、已选择仓库、Actions 读写权限、组织 SSO/审批 |
 | GitHub HTTP 404 | 默认分支上是否已有 `assistant-fix.yml`，仓库名和 PAT 仓库范围是否正确 |
 | Codex 失败 | Actions 日志中检查 `OPENAI_API_KEY`、账户额度与模型可用性 |
-| 推送成功但 PR 创建失败 | Actions 的 PR 创建开关、组织策略和工作流写权限 |
-| PR 的独立 CI 未自动启动 | 工作流内置测试已执行；使用 `GITHUB_TOKEN` 创建 PR 通常不会再触发其他 PR 工作流 |
+| 推送成功但 PR 创建失败 | 本机 Git 登录/PAT 的 Pull requests 写权限，以及助理进程是否在线 |
+| PR 的独立 CI 未自动启动 | 检查 Actions 事件过滤和仓库策略；内置验证任务也已运行原始回归测试 |
 | 任务等待超时 | 查看 Actions 链接确认是否仍在运行；助理不自动重新触发，避免重复任务 |
 
 SQLite 保存任务、消息去重与终态通知。最多排队 5 个任务，逐个触发。POST 响应丢失时按唯一运行标题找回，不重复派发；进程恰好在标记等待后、请求发出前退出的任务会超时，需人工核对后重发。终态通知失败会继续重试；飞书消息 UUID 用于平台有效期内去重。40 分钟等待超时不会取消已经启动的 GitHub 运行，晚到结果请在 Actions 查看。

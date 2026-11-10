@@ -12,6 +12,7 @@ class FakeGitHub:
         self.result = None
         self.pr = None
         self.fail_dispatch = False
+        self.pr_creations = 0
 
     def dispatch(self, job):
         self.dispatched.append(job['id'])
@@ -25,6 +26,10 @@ class FakeGitHub:
         return self.result
 
     def find_pr(self, job):
+        return self.pr
+
+    def create_pr(self, job, run):
+        self.pr_creations += 1
         return self.pr
 
 
@@ -67,6 +72,21 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(job['status'], 'done')
         self.assertEqual(job['notified'], 1)
         self.assertIn(self.github.pr, self.messages[-1][1])
+
+    def test_bot_creates_pr_after_verified_branch(self):
+        self.receive()
+        self.engine.tick()
+        self.complete()
+        self.github.create_pr = lambda job, run: 'https://github.com/example/pr/new'
+        self.engine.tick()
+        self.assertEqual(self.store.get(self.github.dispatched[0])['status'], 'done')
+
+    def test_failed_workflow_does_not_create_pr(self):
+        self.receive()
+        self.engine.tick()
+        self.complete('failure')
+        self.engine.tick()
+        self.assertEqual(self.github.pr_creations, 0)
 
     def test_failed_tests_never_report_success(self):
         self.receive()

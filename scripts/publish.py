@@ -2,8 +2,6 @@
 import os
 import re
 import subprocess
-import tempfile
-from pathlib import Path
 
 
 def run(*args, **kwargs):
@@ -27,19 +25,7 @@ def main():
     # gh sets up authentication without embedding the token in a remote URL or command argument.
     run('gh', 'auth', 'setup-git')
     run('git', '-c', 'core.hooksPath=/dev/null', 'push', 'origin', branch)
-    body = f'''修复订单折扣金额计算，使用原始回归测试验证。
-
-- 任务编号：{job_id}
-- 验证：shop_tests 以及助理服务测试全部通过
-- 执行记录：{os.environ['RUN_URL']}
-
-请审查代码后手动合并。
-'''
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / 'pr-body.md'
-        path.write_text(body, encoding='utf-8')
-        run('gh', 'pr', 'create', '--draft', '--base', os.environ['BASE_BRANCH'], '--head', branch,
-            '--title', 'fix: 修复订单折扣金额计算', '--body-file', str(path))
+    print('Verified repair branch pushed. The local assistant will create the draft PR.')
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ if (Test-Path -LiteralPath '.env') {
 
 $assistantAppId = Read-Host 'Feishu App ID'
 $assistantAppSecret = Read-PrivateValue 'Feishu App Secret (hidden)'
-$assistantGithubToken = Read-PrivateValue 'GitHub fine-grained PAT (hidden)'
+$assistantGithubToken = Read-PrivateValue 'GitHub PAT (hidden; leave blank to reuse existing Git login)'
 $assistantOpenId = Read-Host 'Your Feishu open_id (leave blank to discover later)'
 
 # Quote values to avoid dotenv interpolation and preserve special characters.
@@ -35,6 +35,7 @@ $assistantLines = @(
     ('FEISHU_APP_ID=' + (ConvertTo-DotEnvValue $assistantAppId)),
     ('FEISHU_APP_SECRET=' + (ConvertTo-DotEnvValue $assistantAppSecret)),
     ('GH_TOKEN=' + (ConvertTo-DotEnvValue $assistantGithubToken)),
+    'USE_GIT_LOGIN=true',
     'GITHUB_REPOSITORY=first24/AIHelper',
     'GITHUB_REF_NAME=main',
     ('ALLOWED_OPEN_IDS=' + (ConvertTo-DotEnvValue $assistantOpenId)),

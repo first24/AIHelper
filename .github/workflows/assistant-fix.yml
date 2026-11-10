@@ -95,7 +95,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -122,13 +121,11 @@ jobs:
         run: python -m unittest discover -s shop_tests -v
       - name: Verify assistant service
         run: python -m unittest discover -s tests -v
-      - name: Create repair branch and draft PR
+      - name: Push verified repair branch
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           JOB_ID: ${{ inputs.job_id }}
-          BASE_BRANCH: ${{ github.ref_name }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
           python scripts/publish.py
