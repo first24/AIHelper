@@ -1,9 +1,26 @@
 import hashlib
 import json
+import logging
+import re
 import threading
 import time
 
 from .core import Config, Engine, GitHub, Store, request_json
+
+
+class SafeConnectionLog(logging.Filter):
+    def filter(self, record):
+        message = record.getMessage()
+        if record.levelno < logging.WARNING:
+            if 'disconnected to ' in message:
+                message = '飞书长连接已断开，等待重连'
+            elif 'connected to ' in message:
+                message = '飞书长连接已建立'
+            else:
+                return False
+        record.msg = re.sub(r'wss?://\S+', '[连接地址已隐藏]', message)
+        record.args = ()
+        return True
 
 
 class FeishuSender:
@@ -32,6 +49,7 @@ class FeishuSender:
 
 def run(config: Config, discover=False):
     import lark_oapi as lark
+    from lark_oapi.core.log import logger as sdk_logger
 
     if not config.app_id or not config.app_secret:
         raise ValueError("请先在 .env 配置 FEISHU_APP_ID 和 FEISHU_APP_SECRET")
@@ -67,7 +85,8 @@ def run(config: Config, discover=False):
             print("处理消息失败：" + type(error).__name__, flush=True)
 
     handler = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(on_message).build()
-    client = lark.ws.Client(config.app_id, config.app_secret, event_handler=handler, log_level=lark.LogLevel.WARNING)
+    sdk_logger.addFilter(SafeConnectionLog())
+    client = lark.ws.Client(config.app_id, config.app_secret, event_handler=handler, log_level=lark.LogLevel.INFO)
     print("飞书长连接启动中；" + ("仅处理 /whoami" if discover else "可发送 /修复 演示"), flush=True)
     try:
         client.start()
