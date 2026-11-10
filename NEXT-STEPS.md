@@ -1,6 +1,6 @@
 # 继续真实联调
 
-已完成：代码初始化至 [first24/AIHelper](https://github.com/first24/AIHelper)，助理服务测试、本地错误复现和修复演练通过。真实飞书收发和模型修复尚待凭证配置。
+当前进度：代码已发布至 [first24/AIHelper](https://github.com/first24/AIHelper)，助理服务测试、本地错误复现和修复演练通过，真实飞书收发已验证并启动正式模式。模型已切换至 DeepSeek，首个真实修复任务待配置 DeepSeek 密钥后验收。
 
 ## 1. 飞书
 
@@ -18,7 +18,9 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1 -Mode discover
 
 ## 2. 模型
 
-在 [仓库 Secrets 页面](https://github.com/first24/AIHelper/settings/secrets/actions) 新建 `OPENAI_API_KEY`。不用把 Key 发到聊天里。
+在 [仓库 Secrets 页面](https://github.com/first24/AIHelper/settings/secrets/actions) 新建 `DEEPSEEK_API_KEY`，填入 [DeepSeek 开放平台](https://platform.deepseek.com/) 的 API Key。原先的 `OPENAI_API_KEY` 不再被修复工作流使用。不用把 Key 发到聊天里。
+
+当前调用 `deepseek-flash`，费用计入 DeepSeek API 账户。仅保存 Secret 不产生模型调用；发出修复任务后才会调用模型。
 
 ## 3. 发出第一条修复指令
 

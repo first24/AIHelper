@@ -43,5 +43,5 @@ $assistantLines = @(
 )
 [IO.File]::WriteAllLines((Join-Path $PSScriptRoot '.env'), $assistantLines, [Text.UTF8Encoding]::new($false))
 Write-Host 'Saved .env locally. Never upload this file.'
-Write-Host 'Put OPENAI_API_KEY in GitHub repository Actions secrets, not here.'
+Write-Host 'Put DEEPSEEK_API_KEY in GitHub repository Actions secrets, not here.'
 Write-Host 'Next: python -m assistant discover; send /whoami in Feishu.'

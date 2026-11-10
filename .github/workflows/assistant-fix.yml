@@ -33,6 +33,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check DeepSeek secret
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        shell: bash
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "::error::Add the DEEPSEEK_API_KEY repository Actions secret before starting a repair."
+            exit 1
+          fi
       - name: Record base and prepare request
         id: base
         env:
@@ -63,10 +72,15 @@ jobs:
       - name: Reproduce the intentional pricing regression
         continue-on-error: true
         run: python -m unittest discover -s shop_tests -v
-      - name: Repair with Codex
+      - name: Repair with DeepSeek through Codex
         uses: openai/codex-action@v1
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          # The action's generic key input keeps this name for compatible providers.
+          # The key is sent to the explicit DeepSeek endpoint below.
+          openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          responses-api-endpoint: https://api.deepseek.com/responses
+          model: deepseek-flash
+          effort: low
           prompt-file: ${{ runner.temp }}/repair-prompt.txt
           safety-strategy: drop-sudo
           sandbox: workspace-write

@@ -1,11 +1,11 @@
 # 飞书个人代码助理：AIHelper
 
-实际验收场景：你在飞书私聊机器人发送 `/修复 演示`，助理触发 `first24/AIHelper` 的 GitHub Actions，Codex 修复一个折扣金额计算错误，原始测试全部通过后推送修复分支，本机助理创建草稿 PR，并把 PR 链接回报到原飞书会话。你审查后手动合并。
+实际验收场景：你在飞书私聊机器人发送 `/修复 演示`，助理触发 `first24/AIHelper` 的 GitHub Actions，Codex 执行器调用 DeepSeek 模型修复一个折扣金额计算错误，原始测试全部通过后推送修复分支，本机助理创建草稿 PR，并把 PR 链接回报到原飞书会话。你审查后手动合并。
 
 ```mermaid
 flowchart LR
   A[飞书私聊 /修复 演示] -->|官方 SDK 长连接| B[本机 Python 助理]
-  B -->|workflow_dispatch| C[GitHub Actions + Codex]
+  B -->|workflow_dispatch| C[GitHub Actions + Codex + DeepSeek]
   C --> D[新运行器执行原始测试]
   D -->|通过| E[修复分支]
   D -->|失败| F[保留日志并报告失败]
@@ -22,12 +22,14 @@ flowchart LR
 
 在 GitHub 仓库中：
 
-1. Settings → Secrets and variables → Actions → New repository secret，添加 `OPENAI_API_KEY`。模型调用使用该 Key 对应的 API 账户；以该账户可用额度为准。
+1. Settings → Secrets and variables → Actions → New repository secret，添加 `DEEPSEEK_API_KEY`，值来自 [DeepSeek 开放平台](https://platform.deepseek.com/)。模型调用使用该 Key 对应的 DeepSeek API 账户余额，独立按量计费；不使用 ChatGPT Plus 额度。
 2. 保持现有仓库权限设置即可。本方案由本机助理使用你的 GitHub 登录创建草稿 PR，无需开启 **Allow GitHub Actions to create and approve pull requests**。
 3. 允许运行本仓库引用的 Actions。确认 Actions 页能看到 **Feishu code assistant**。
 4. 本机已有 Git Credential Manager 登录时，保持 `USE_GIT_LOGIN=true`、`GH_TOKEN` 留空，助理会通过 Git 凭证助手在进程内读取登录凭证，不打印或保存。也可创建一个仅选择本仓库的 fine-grained PAT：**Actions: Read and write、Contents: Read、Pull requests: Read and write**，填入本机 `.env` 的 `GH_TOKEN`。
 
-`OPENAI_API_KEY` 只配置在 GitHub Secrets；飞书 Secret 和可选的本机 GitHub PAT 只保留在本机 `.env`。Actions 使用自己的 `GITHUB_TOKEN` 推送验证后的分支，本机助理使用已有 Git 登录或上述 PAT 创建草稿 PR。
+`DEEPSEEK_API_KEY` 只配置在 GitHub Secrets；飞书 Secret 和可选的本机 GitHub PAT 只保留在本机 `.env`。Actions 使用自己的 `GITHUB_TOKEN` 推送验证后的分支，本机助理使用已有 Git 登录或上述 PAT 创建草稿 PR。
+
+当前模型为 `deepseek-flash`，使用 DeepSeek 官方的 Responses 兼容接口 `https://api.deepseek.com/responses`。Codex 负责读文件、编辑和运行测试，底层推理由 DeepSeek 提供。任务描述及执行器读取的源码/测试上下文会发送到 DeepSeek。工作流中的 `openai-api-key` 是 Action 的固定输入名称，实际引用的是 `secrets.DEEPSEEK_API_KEY` 并发往上述 DeepSeek 地址；没有调用 OpenAI 模型的回退路径。以前配置的 `OPENAI_API_KEY` 不再被此工作流读取，无需把 DeepSeek Key 放进旧 Secret 中。
 
 ## 2. 配置已有飞书应用
 
@@ -83,7 +85,7 @@ GitHub API 自动沿用 Git 的 `http.proxy` 配置，也可以在 `.env` 设置
 1. 私聊飞书机器人：`/修复 演示`。
 2. 收到任务编号；GitHub Actions 页出现标题 `assistant-<任务编号>` 的运行。
 3. 工作流先复现错误：`19.99 × 0.9` 应得 `17.99`，演示代码返回 `18.99`。
-4. Codex 修改 `demo_shop/pricing.py`。独立发布任务用干净的原始代码和原始测试验证，只接收修复后的那一个源文件。
+4. Codex 执行器调用 DeepSeek 修改 `demo_shop/pricing.py`。独立发布任务用干净的原始代码和原始测试验证，只接收修复后的那一个源文件。
 5. 5 项业务回归测试及助理服务测试通过，推送 `assistant/<任务编号>` 分支。本机助理检测到运行成功，使用你的 GitHub 身份创建草稿 PR。
 6. 飞书收到真实 PR 链接和“等待你审查合并”。这一步完成才算真实端到端验收。
 
@@ -118,7 +120,7 @@ python -m assistant demo
 | `/whoami` 有回复，修复没回复 | 正式模式是否启动、`ALLOWED_OPEN_IDS` 是否与本人 open_id 一致；正式模式不处理 `/whoami` |
 | GitHub HTTP 401/403 | PAT 是否有效、已选择仓库、Actions 读写权限、组织 SSO/审批 |
 | GitHub HTTP 404 | 默认分支上是否已有 `assistant-fix.yml`，仓库名和 PAT 仓库范围是否正确 |
-| Codex 失败 | Actions 日志中检查 `OPENAI_API_KEY`、账户额度与模型可用性 |
+| 修复执行器失败 | Actions 日志中检查 `DEEPSEEK_API_KEY`、DeepSeek API 余额及 `deepseek-flash` 可用性；401 通常需检查密钥，402 需检查余额 |
 | 推送成功但 PR 创建失败 | 本机 Git 登录/PAT 的 Pull requests 写权限，以及助理进程是否在线 |
 | PR 的独立 CI 未自动启动 | 检查 Actions 事件过滤和仓库策略；内置验证任务也已运行原始回归测试 |
 | 任务等待超时 | 查看 Actions 链接确认是否仍在运行；助理不自动重新触发，避免重复任务 |
@@ -132,5 +134,7 @@ SQLite 保存任务、消息去重与终态通知。最多排队 5 个任务，�
 ## 参考
 
 - [OpenAI Docs：Codex GitHub Action](https://learn.chatgpt.com/docs/github-action)
+- [DeepSeek 官方：Codex 接入](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)
+- [DeepSeek 官方：Responses 兼容接口](https://api-docs.deepseek.com/guides/responses_api/)
 - [飞书官方：Python SDK 处理事件 / 长连接](https://open.feishu.cn/document/server-side-sdk/python--sdk/handle-events)
 - [GitHub：工作流触发机制](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)

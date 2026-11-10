@@ -43,7 +43,7 @@ def demo():
                 text = source.read_text(encoding='utf-8')
                 if old not in text:
                     raise RuntimeError('Demo fixture changed')
-                # Fixture patch, explicitly NOT an AI call. Live workflow uses Codex instead.
+                # Fixture patch, NOT an AI call. Live workflow uses Codex with DeepSeek.
                 source.write_text(text.replace(old, '(amount * rate)').replace(
                     '    # Intentional demo bug: subtracting the rate instead of multiplying it.\n', ''), encoding='utf-8')
                 after = command(sys.executable, '-m', 'unittest', 'discover', '-s', 'shop_tests', '-v', check=False)
@@ -87,7 +87,7 @@ def demo():
             f"- 修复前测试退出码：{report['before']['returncode']}\n"
             f"- 修复后测试退出码：{report['after']['returncode']}（5 项通过）\n"
             f"- 分支：`{report['branch']}`\n- 本地提交：`{report['commit']}`\n"
-            '- GitHub 工作流、PR 和飞书消息：使用模拟通道。线上版通过 Codex Action 修复。\n\n'
+            '- GitHub 工作流、PR 和飞书消息：使用模拟通道。线上版通过 Codex Action 调用 DeepSeek 修复。\n\n'
             '## 代码差异\n\n```diff\n' + report['diff'] + '\n```\n\n'
             '## 修复后测试记录\n\n```text\n' + report['after']['log'] + '\n```\n', encoding='utf-8')
         print('离线演练通过；完整记录：demo-report.md / demo-report.json')
