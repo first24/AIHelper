@@ -72,6 +72,15 @@ jobs:
       - name: Reproduce the intentional pricing regression
         continue-on-error: true
         run: python -m unittest discover -s shop_tests -v
+      - name: Prepare isolated execution user
+        shell: bash
+        run: |
+          sudo adduser --system --home /home/aihelper --shell /bin/bash --group aihelper
+          sudo usermod -a -G aihelper runner
+          sudo usermod -a -G runner aihelper
+          sudo chown -R runner:aihelper "$GITHUB_WORKSPACE"
+          sudo chmod -R g+rwX "$GITHUB_WORKSPACE"
+          sudo find "$GITHUB_WORKSPACE" -type d -exec chmod g+s {} +
       - name: Repair with DeepSeek through Codex
         uses: openai/codex-action@v1
         with:
@@ -82,7 +91,8 @@ jobs:
           model: deepseek-flash
           effort: low
           prompt-file: ${{ runner.temp }}/repair-prompt.txt
-          safety-strategy: drop-sudo
+          safety-strategy: unprivileged-user
+          codex-user: aihelper
           sandbox: workspace-write
       - name: Export only the repaired source file
         shell: bash

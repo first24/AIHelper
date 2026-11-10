@@ -4,6 +4,7 @@ import logging
 import re
 import threading
 import time
+from pathlib import Path
 
 from .core import Config, Engine, GitHub, Store, request_json
 
@@ -78,6 +79,15 @@ def run(config: Config, discover=False):
         open_id = event.sender.sender_id.open_id
         try:
             text = json.loads(message.content).get("text", "").strip()
+            if text.startswith('/'):
+                record = {'sender_open_id': open_id, 'chat_id': message.chat_id,
+                          'message_id': message.message_id, 'allowed': open_id in config.users,
+                          'kind': 'whoami' if text == '/whoami' else ('repair' if text.startswith('/修复') else 'other'),
+                          'received_at': time.time()}
+                receipt_path = Path(config.db).parent / 'last-command.json'
+                receipt_path.parent.mkdir(parents=True, exist_ok=True)
+                receipt_path.write_text(json.dumps(record), encoding='utf-8')
+                print(f"飞书指令已收到：{record['kind']}，授权匹配：{record['allowed']}", flush=True)
             if discover:
                 if text == "/whoami":
                     sender(message.chat_id, "你的 open_id：" + open_id + "\n把它填入本机 .env 的 ALLOWED_OPEN_IDS 后退出发现模式。", message.message_id)

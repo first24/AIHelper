@@ -31,6 +31,8 @@ flowchart LR
 
 当前模型为 `deepseek-flash`，使用 DeepSeek 官方的 Responses 兼容接口 `https://api.deepseek.com/responses`。Codex 负责读文件、编辑和运行测试，底层推理由 DeepSeek 提供。任务描述及执行器读取的源码/测试上下文会发送到 DeepSeek。工作流中的 `openai-api-key` 是 Action 的固定输入名称，实际引用的是 `secrets.DEEPSEEK_API_KEY` 并发往上述 DeepSeek 地址；没有调用 OpenAI 模型的回退路径。以前配置的 `OPENAI_API_KEY` 不再被此工作流读取，无需把 DeepSeek Key 放进旧 Secret 中。
 
+GitHub 修复作业使用独立的 `aihelper` 低权限用户和工作区沙箱运行执行器，验证与推送仍在另一个干净的作业中进行。
+
 ## 2. 配置已有飞书应用
 
 需要企业自建应用的“应用机器人”。只有群自定义机器人的 Webhook 地址不能接收本方案的私聊指令。
