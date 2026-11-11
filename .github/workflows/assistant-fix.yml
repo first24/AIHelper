@@ -1,9 +1,18 @@
 name: Feishu code assistant
-run-name: assistant-${{ inputs.job_id }}
+run-name: ${{ inputs.mode == 'project' && 'project' || 'assistant' }}-${{ inputs.job_id }}
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Demo or configured real project
+        type: choice
+        options: [demo, project]
+        default: demo
+      project_spec:
+        description: Configured project, immutable base and test argv
+        type: string
+        required: false
       job_id:
         description: 16-character assistant task ID
         required: true
@@ -17,11 +26,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: assistant-demo
+  group: assistant-${{ inputs.mode || 'demo' }}
   cancel-in-progress: false
 
 jobs:
   repair:
+    if: inputs.mode != 'project'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -114,6 +124,7 @@ jobs:
           if-no-files-found: error
 
   verify-and-publish:
+    if: inputs.mode != 'project'
     needs: repair
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -153,3 +164,106 @@ jobs:
         shell: bash
         run: |
           python scripts/publish.py
+
+  project-repair:
+    if: inputs.mode == 'project'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROJECT_SPEC: ${{ inputs.project_spec }}
+      JOB_ID: ${{ inputs.job_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ fromJSON(inputs.project_spec).repository }}
+          ref: ${{ fromJSON(inputs.project_spec).base_sha }}
+          path: target
+          token: ${{ secrets.PROJECT_CHECKOUT_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project dependencies
+        working-directory: target
+        run: if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+      - name: Prepare trusted request
+        working-directory: target
+        env:
+          REPAIR_REQUEST: ${{ inputs.request_text }}
+        run: python ../controller/scripts/project_repair.py prepare
+      - name: Prepare isolated execution user
+        shell: bash
+        run: |
+          sudo adduser --system --home /home/aihelper --shell /bin/bash --group aihelper
+          sudo usermod -a -G aihelper runner
+          sudo usermod -a -G runner aihelper
+          sudo chown -R aihelper:aihelper target
+          sudo chown runner:aihelper target
+          sudo chmod 1775 target
+          sudo chown -R runner:runner target/.git controller
+          sudo chmod -R go-w target/.git controller
+          sudo chmod -R a+rX controller target/.git
+      - name: Repair project using DeepSeek
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          responses-api-endpoint: https://api.deepseek.com/responses
+          model: deepseek-flash
+          effort: low
+          working-directory: ${{ github.workspace }}/target
+          prompt-file: ${{ runner.temp }}/project-prompt.txt
+          safety-strategy: unprivileged-user
+          codex-user: aihelper
+          sandbox: workspace-write
+      - name: Export source-only proposal
+        working-directory: target
+        run: python ../controller/scripts/project_repair.py export
+      - uses: actions/upload-artifact@v4
+        with:
+          name: project-proposal
+          path: ${{ runner.temp }}/project-proposal/proposal.json
+          retention-days: 3
+          if-no-files-found: error
+
+  project-verify:
+    needs: project-repair
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROJECT_SPEC: ${{ inputs.project_spec }}
+      JOB_ID: ${{ inputs.job_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ fromJSON(inputs.project_spec).repository }}
+          ref: ${{ fromJSON(inputs.project_spec).base_sha }}
+          path: target
+          token: ${{ secrets.PROJECT_CHECKOUT_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: project-proposal
+          path: ${{ runner.temp }}/project-proposal
+      - name: Install clean project dependencies
+        working-directory: target
+        run: if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+      - name: Verify candidate and original regression tests
+        working-directory: target
+        run: python ../controller/scripts/project_repair.py verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: project-verified
+          path: ${{ runner.temp }}/project-verified/verified.json
+          retention-days: 3
+          if-no-files-found: error

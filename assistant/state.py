@@ -101,9 +101,25 @@ class State:
             owner TEXT, key TEXT, value TEXT, PRIMARY KEY(owner,key));
         CREATE TABLE IF NOT EXISTS notes (
             id TEXT PRIMARY KEY, owner TEXT, title TEXT, body TEXT, created REAL, updated REAL);
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id TEXT PRIMARY KEY, owner TEXT, chat TEXT, title TEXT, kind TEXT, source TEXT,
+            due REAL, repeat TEXT, status TEXT DEFAULT 'active', snapshot TEXT DEFAULT '{}',
+            revision INTEGER DEFAULT 0, attempts INTEGER DEFAULT 0, retry_at REAL DEFAULT 0,
+            last_checked REAL DEFAULT 0, last_error TEXT DEFAULT '');
+        CREATE TABLE IF NOT EXISTS inbox_watch (
+            owner TEXT PRIMARY KEY, chat TEXT, enabled INTEGER, validity TEXT, last_uid INTEGER,
+            keywords TEXT DEFAULT '', next_check REAL DEFAULT 0, last_error TEXT DEFAULT '');
+        CREATE TABLE IF NOT EXISTS project_jobs (
+            id TEXT PRIMARY KEY, owner TEXT, chat TEXT, repository TEXT, ref TEXT, base_sha TEXT,
+            problem TEXT, settings TEXT, status TEXT, created REAL, run_id INTEGER,
+            run_url TEXT DEFAULT '', pr_url TEXT DEFAULT '', result TEXT DEFAULT '', notified INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS effects (
             id TEXT PRIMARY KEY, result TEXT);
         ''')
+        draft_columns={row[1] for row in self.db.execute('PRAGMA table_info(drafts)')}
+        for column in ('in_reply_to','references_header'):
+            if column not in draft_columns:
+                self.db.execute('ALTER TABLE drafts ADD COLUMN '+column+" TEXT DEFAULT ''")
         self.db.commit()
 
     @contextmanager
