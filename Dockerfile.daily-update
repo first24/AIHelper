@@ -1,0 +1,4 @@
+# Incremental update for the existing Weixin-enabled deployment.
+# A clean installation uses the standard Dockerfile.
+FROM aihelper-weixin:2.1
+COPY --chown=assistant:assistant assistant/ /app/assistant/
