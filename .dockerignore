@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+.venv
+data
+work
+outputs
+**/__pycache__
+**/*.pyc
+*.zip
+*-report.*
+feishu-diagnostic.json

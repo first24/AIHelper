@@ -58,10 +58,10 @@ class Config:
             db=os.getenv("ASSISTANT_DB", "data/jobs.sqlite3"),
         )
 
-    def validate(self):
+    def validate(self, require_github=True):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.repo):
             raise ValueError("GITHUB_REPOSITORY 格式应为 owner/repo")
-        missing = [k for k, v in {"GH_TOKEN": self.token, "FEISHU_APP_ID": self.app_id,
+        missing = [k for k, v in {"GH_TOKEN": self.token if require_github else True, "FEISHU_APP_ID": self.app_id,
                    "FEISHU_APP_SECRET": self.app_secret, "ALLOWED_OPEN_IDS": self.users}.items() if not v]
         if missing:
             raise ValueError("尚未配置：" + ", ".join(missing))
