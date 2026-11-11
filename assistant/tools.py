@@ -38,7 +38,7 @@ SPECS = [
     spec('draft_email', '生成邮件草稿并显示预览。这个工具不会发送邮件；发送需用户输入 /发送邮件 草稿编号。',
          {'to':string('一个完整邮箱地址，不能是姓名',254),'subject':string('邮件主题',200),'body':string('纯文本邮件正文',8000)}, ['to','subject','body']),
     spec('list_email_drafts', '查看本人最近的邮件草稿和发送状态。'),
-    spec('schedule_daily_brief', '按指定未来时间定期向本人飞书汇总未完成待办，内容不需要再次调用模型。',
+    spec('schedule_daily_brief', '按指定未来时间定期在当前聊天向本人汇总未完成待办，内容不需要再次调用模型。',
          {'at':AT,'repeat':REPEAT}, ['at']),
     spec('remember_preference', '仅在用户要求记住偏好时保存，不保存密钥、密码或授权码。',
          {'key':string('偏好名称',enum=['language','email_signature','brief_style']), 'value':string('偏好值',500)}, ['key','value']),

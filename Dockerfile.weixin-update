@@ -1,0 +1,7 @@
+# Incremental deployment on an existing AIHelper v2 server.
+# For a clean installation, use the standard Dockerfile.
+FROM aihelper-v2-assistant:pre-weixin
+USER root
+RUN pip install --no-cache-dir 'qrcode>=8.2,<9' 'pypng>=0.20220715.0,<1'
+COPY --chown=assistant:assistant assistant/ /app/assistant/
+USER assistant

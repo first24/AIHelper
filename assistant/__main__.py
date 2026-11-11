@@ -10,7 +10,7 @@ from .core import Config, GitHub, existing_git_token
 
 def main():
     parser = argparse.ArgumentParser(description="飞书 AI 个人助理")
-    parser.add_argument("command", choices=["run", "discover", "doctor", "demo", "demo-assistant", "health"])
+    parser.add_argument("command", choices=["run", "discover", "doctor", "demo", "demo-assistant", "health", "weixin-login"])
     args = parser.parse_args()
     if args.command == "demo":
         from .demo import demo
@@ -26,11 +26,17 @@ def main():
         raise SystemExit("请先运行 python -m pip install -r requirements.txt") from None
     load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False, interpolate=False)
     config = Config.from_env()
+    if args.command == 'weixin-login':
+        from .weixin import login
+        login(config.db)
+        return
     if args.command == 'health':
         try:
             health=json.loads((Path(config.db).parent/'health.json').read_text(encoding='utf-8'))
             if time.time()-health['updated_at']>120 or not health['conversation_worker_alive'] or not health.get('connected'):
                 raise ValueError('助理健康检查未通过')
+            if health.get('weixin_worker_alive') is False:
+                raise ValueError('微信工作线程已停止')
         except (OSError,KeyError,ValueError):
             raise SystemExit(1) from None
         print('healthy')
