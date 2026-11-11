@@ -59,6 +59,10 @@ class Mailer:
         message['To'] = draft['recipient']
         message['Subject'] = draft['subject']
         message['Message-ID'] = f'<{draft_id}@aihelper.local>'
+        if draft.get('in_reply_to'):
+            message['In-Reply-To']=draft['in_reply_to']
+        if draft.get('references_header'):
+            message['References']=draft['references_header']
         message.set_content(draft['body'])
         client = None
         status, detail = 'unknown', '发送结果未知，请核查邮箱，未自动重发'

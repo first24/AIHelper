@@ -111,7 +111,16 @@ def run(config: Config, discover=False):
             state = State(config.db)
             state.recover()
             zone = user_zone(os.getenv('ASSISTANT_TIMEZONE', 'Asia/Shanghai'))
-            assistant = Assistant(config,state,DeepSeek(),Mailer(state),sender,zone,engine)
+            from .connected import ConnectedServices
+            model=DeepSeek()
+            services=ConnectedServices(config,state,zone,model)
+            assistant = Assistant(config,state,model,Mailer(state),sender,zone,engine,services=services)
+            def connected_work():
+                while not stop.is_set():
+                    services.tick()
+                    stop.wait(10)
+            connected_thread=threading.Thread(target=connected_work,daemon=True,name='connected-worker')
+            connected_thread.start()
             weixin_thread = None
             if os.getenv('WEIXIN_ENABLED', '').lower() == 'true':
                 from .weixin import WeixinChannel
@@ -137,7 +146,8 @@ def run(config: Config, discover=False):
                 while not stop.is_set():
                     try:
                         state.deliver(sender,time.time(),zone)
-                        health={'updated_at':time.time(), 'conversation_worker_alive':conversation_thread.is_alive(), **connection_status}
+                        health={'updated_at':time.time(), 'conversation_worker_alive':conversation_thread.is_alive(),
+                                'connected_worker_alive':connected_thread.is_alive(), **connection_status}
                         if weixin_channel:
                             health['weixin_status'] = weixin_channel.status
                             health['weixin_worker_alive'] = weixin_thread.is_alive()

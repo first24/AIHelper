@@ -6,21 +6,8 @@ from datetime import datetime, timedelta
 
 from .mail import MAIL_STATUSES, address, format_email
 from .state import parse_at
-
-
-def string(description, limit=500, **extra):
-    return {'type': 'string', 'description': description, 'maxLength': limit, **extra}
-
-
-def spec(name, description, properties=None, required=None):
-    return {'type': 'function', 'function': {'name': name, 'description': description,
-            'parameters': {'type': 'object', 'properties': properties or {},
-                           'required': required or [], 'additionalProperties': False}}}
-
-
-REPEAT = string('once=单次，daily=每天，weekdays=周一至周五，weekly=每周', enum=['once','daily','weekdays','weekly'])
-AT = string('未来的完整 ISO 日期时间，包含时区偏移，例如 2026-11-12T15:00:00+08:00', 80)
-ID = string('从工具结果获得的真实编号，不能编造', 64)
+from .schemas import AT,ID,REPEAT,spec,string
+from .connected_schemas import EXTRA_NAMES,EXTRA_SPECS
 SPECS = [
     spec('create_reminder', '保存提醒。先明确内容和未来执行时间，再创建；返回真实编号和时间。',
          {'text': string('提醒内容', 1000), 'at': AT, 'repeat': REPEAT}, ['text','at']),
@@ -61,6 +48,7 @@ SPECS = [
     spec('start_code_repair', '触发原有 GitHub 演示代码修复，仅支持 demo_shop/pricing.py。',
          {'problem':string('完整问题描述',3000)}, ['problem']),
 ]
+SPECS+=EXTRA_SPECS
 
 
 def validate(name, args):
@@ -86,9 +74,10 @@ def validate(name, args):
 
 
 class Tools:
-    def __init__(self, state, owner, chat, message_id, zone, legacy=None, clock=time.time):
+    def __init__(self, state, owner, chat, message_id, zone, legacy=None, clock=time.time, services=None):
         self.state, self.owner, self.chat = state, owner, chat
         self.message_id, self.zone, self.legacy, self.clock = message_id, zone, legacy, clock
+        self.services=services
 
     def execute(self, name, args):
         validate(name, args)
@@ -106,8 +95,13 @@ class Tools:
                     'save_note':self.save_note,'list_notes':self.list_notes,'get_note':self.get_note,
                     'update_note':self.update_note,'delete_note':self.delete_note,
                     'remember_preference':self.remember_preference,'start_code_repair':self.start_code_repair}
-        result = handlers[name](effect_id=effect_id, **args)
-        if not name.startswith(('list_', 'find_', 'get_')):
+        if name in EXTRA_NAMES:
+            if self.services is None:
+                raise ValueError('联网扩展尚未启动，请检查助理运行配置')
+            result=self.services.execute(name,args,self.owner,self.chat,self.message_id,effect_id)
+        else:
+            result = handlers[name](effect_id=effect_id, **args)
+        if not name.startswith(('list_', 'find_', 'get_')) and name not in ('web_search','read_webpage'):
             self.state.execute('INSERT OR IGNORE INTO effects(id,result) VALUES(?,?)', (effect_id,json.dumps(result,ensure_ascii=False)))
         return result
 
