@@ -7,7 +7,7 @@ if (-not (Test-Path -LiteralPath $assistantPython)) {
     python -m venv .venv
     if ($LASTEXITCODE -ne 0) { throw 'Creating Python environment failed' }
 }
-& $assistantPython -c 'import lark_oapi, dotenv' 2>$null
+& $assistantPython -c 'import lark_oapi, dotenv, tzdata' 2>$null
 if ($LASTEXITCODE -ne 0) {
     & $assistantPython -m pip install -r requirements.txt
     if ($LASTEXITCODE -ne 0) { throw 'Installing dependencies failed' }

@@ -10,10 +10,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
-      # shop_tests intentionally fail on main until the first repair PR is merged.
-      - if: github.event_name == 'pull_request'
+      - run: python -m assistant demo-assistant
+      # main deliberately retains the pricing fixture until its repair PR is merged.
+      # Validate business regression tests whenever the pricing implementation changes.
+      - name: Check pricing scope
+        id: scope
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import os, subprocess
+          result = subprocess.run(['git', 'diff', '--quiet', os.environ['BASE_SHA'], os.environ['HEAD_SHA'], '--', 'demo_shop/pricing.py'])
+          if result.returncode not in (0, 1):
+              raise SystemExit(result.returncode)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write('pricing=' + ('true' if result.returncode else 'false') + '\n')
+          PY
+      - if: steps.scope.outputs.pricing == 'true'
         run: python -m unittest discover -s shop_tests -v
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build deployment image
+        run: docker build -t aihelper-v2:test .
+      - name: Verify non-root image and writable persistent data
+        run: |
+          docker run --rm --read-only --tmpfs /tmp --mount type=volume,source=aihelper-v2-ci,target=/data \
+            aihelper-v2:test python -c "import os; from assistant.state import State, user_zone, acquire_instance_lock; assert os.getuid() != 0; lock=acquire_instance_lock('/data/test.sqlite3'); state=State('/data/test.sqlite3'); assert str(user_zone('Asia/Shanghai')) == 'Asia/Shanghai'; state.db.close(); lock.close(); print('non-root image, timezone and persistent data verified')"
