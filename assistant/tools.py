@@ -197,10 +197,25 @@ class Tools:
         lines.extend(f"• {item['id']}｜{item['text']}｜{item['at']}｜{item['channel']}" for item in reminders[:10])
         if len(reminders)>10:
             lines.append('更多提醒请用 /提醒 查看。')
+        calendar_events=[]
+        calendar_status='未连接'
+        if self.services:
+            try:
+                start=now.replace(hour=0,minute=0,second=0,microsecond=0)
+                calendar_events=self.services.calendar.events(self.owner,start.isoformat(),tomorrow.isoformat())['events']
+                calendar_status='已连接'
+                lines.append(f'\n今日个人飞书日程（{len(calendar_events)} 项）')
+                lines.extend(f"• {item['title']}｜{item['start']} 至 {item['end']}｜{item['id']}" for item in calendar_events[:20])
+                if len(calendar_events)>20:
+                    lines.append('更多个人日程请用 /日历 查看。')
+            except (ValueError,RuntimeError,OSError):
+                calendar_status='暂不可用，请用 /连接状态 检查授权'
+                lines.append('\n个人飞书日历：'+calendar_status)
         return {'ok':True,'date':now.date().isoformat(),'pending_todos':len(todos),
                 'counts':{**{key:len(items) for key,items in groups.items()},'reminders':len(reminders)},
                 'todos':{key:items[:20] for key,items in groups.items()},
-                'reminders':reminders[:20],'receipt':'\n'.join(lines)}
+                'reminders':reminders[:20],'calendar_status':calendar_status,'calendar_events':calendar_events[:20],
+                'receipt':'\n'.join(lines)}
 
     def update_reminder(self, id, text=None, at=None, repeat=None, effect_id=''):
         with self.state.transaction() as db:

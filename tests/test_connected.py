@@ -163,6 +163,20 @@ class InboxTests(unittest.TestCase):
 
 
 class CalendarTests(unittest.TestCase):
+    def test_daily_overview_includes_personal_calendar_without_hiding_todos(self):
+        state=State(':memory:')
+        self.addCleanup(state.db.close)
+        services=Mock()
+        services.calendar.events.return_value={'events':[{'id':'event','title':'Meeting','start':'2026-11-11T10:00:00+08:00','end':'2026-11-11T11:00:00+08:00'}]}
+        tool=Tools(state,'owner','chat','daily',ZONE,clock=lambda:NOW,services=services)
+        result=tool.get_daily_overview()
+        self.assertIn('Meeting',result['receipt'])
+        self.assertIn('未完成待办',result['receipt'])
+        services.calendar.events.side_effect=RuntimeError('Token expired')
+        result=tool.get_daily_overview()
+        self.assertIn('暂不可用',result['receipt'])
+        self.assertIn('未完成待办',result['receipt'])
+
     def test_create_uses_32_character_idempotency_key(self):
         from urllib.parse import parse_qs,urlsplit
         cal=Calendar(CONFIG,ZONE,clock=lambda:NOW)
