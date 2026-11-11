@@ -7,5 +7,4 @@ def discounted_total(price: str, discount: str) -> Decimal:
     rate = Decimal(discount)
     if amount < 0 or not Decimal("0") <= rate <= Decimal("1"):
         raise ValueError("invalid price or discount")
-    # Intentional demo bug: subtracting the rate instead of multiplying it.
-    return (amount - (Decimal("1") - rate) * 10).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (amount * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
