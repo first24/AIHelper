@@ -27,7 +27,9 @@ def format_email(draft):
 
 
 def address(value):
-    if not isinstance(value, str) or len(value) > 254 or not re.fullmatch(r'[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', value):
+    domain = r'(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}'
+    local = r'[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+'
+    if not isinstance(value, str) or len(value) > 254 or not re.fullmatch(local + '@' + domain, value):
         raise ValueError('请提供完整邮箱地址，不要只填写收件人姓名')
     return value
 
