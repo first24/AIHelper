@@ -163,6 +163,19 @@ class InboxTests(unittest.TestCase):
 
 
 class CalendarTests(unittest.TestCase):
+    def test_create_uses_32_character_idempotency_key(self):
+        from urllib.parse import parse_qs,urlsplit
+        cal=Calendar(CONFIG,ZONE,clock=lambda:NOW)
+        start=datetime.fromtimestamp(NOW+3600,ZONE)
+        end=start+timedelta(minutes=30)
+        with patch.object(cal,'events',return_value={'calendar_id':'calendar','events':[]}),patch.object(cal,'call',return_value={'event':{'event_id':'new'}}) as api:
+            one=cal.create('owner','Test',start.isoformat(),end.isoformat(),'','1234567890abcdef')
+            self.assertTrue(one['ok'])
+            key=parse_qs(urlsplit(api.call_args.args[1]).query)['idempotency_key'][0]
+            self.assertEqual(len(key),32)
+            cal.create('owner','Test',start.isoformat(),end.isoformat(),'','1234567890abcdef')
+            self.assertIn(key,api.call_args.args[1])
+
     def test_conflicts_and_slots(self):
         cal=Calendar(CONFIG,ZONE,clock=lambda:NOW)
         start=datetime.fromtimestamp(NOW+3600,ZONE)

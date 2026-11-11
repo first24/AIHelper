@@ -154,7 +154,8 @@ class Calendar:
         body={'summary':title,'description':description,'start_time':{'timestamp':str(int(first.timestamp())),'timezone':str(self.zone)},
               'end_time':{'timestamp':str(int(last.timestamp())),'timezone':str(self.zone)},'visibility':'default',
               'free_busy_status':'busy','need_notification':False}
-        event=self.call(owner,'calendars/'+quote(calendar,safe='')+'/events?'+urlencode({'idempotency_key':effect_id}),'POST',body)['event']
+        key=hashlib.sha256(effect_id.encode()).hexdigest()[:32]
+        event=self.call(owner,'calendars/'+quote(calendar,safe='')+'/events?'+urlencode({'idempotency_key':key}),'POST',body)['event']
         return {'ok':True,'id':event['event_id'],'url':event.get('app_link',''),
                 'receipt':f"已创建个人日程 {event['event_id']}：{title}\n{first.isoformat()} 至 {last.isoformat()}\n"+event.get('app_link','')}
 
