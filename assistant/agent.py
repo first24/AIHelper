@@ -50,7 +50,7 @@ class DeepSeek:
             raise RuntimeError('DeepSeek 响应格式无效') from None
 
 
-HELP='''AIHelper 第二版
+HELP='''AIHelper 个人助理
 直接发送自然语言，例如：
 • 明天下午三点提醒我交报告
 • 每个工作日九点提醒我看待办
@@ -113,6 +113,10 @@ class Assistant:
             return HELP
         if text=='/whoami':
             return '你的 open_id：'+owner
+        if text=='/微信附件':
+            return '微信通道目前支持文字消息，请把内容以文字发送。'
+        if text=='/微信长文本':
+            return '请将消息拆分为每条不超过 6000 字后再发送。'
         if text=='/清空对话':
             self.state.execute('DELETE FROM turns WHERE owner=? AND chat=?',(owner,chat))
             return '已清除当前对话历史。提醒、待办、联系人和草稿保留，可分别查询和取消。'
@@ -145,7 +149,8 @@ class Assistant:
             return HELP
         now=datetime.fromtimestamp(self.clock(),self.zone).isoformat(timespec='seconds')
         prefs=self.state.rows('SELECT key,value FROM preferences WHERE owner=?',(owner,))
-        system=f'''你是用户的飞书个人助理。用中文简洁回复。
+        channel='微信' if chat.startswith('weixin:') else '飞书'
+        system=f'''你是用户的{channel}个人助理。用中文简洁回复。
 当前真实时间：{now}，默认时区：{self.zone}。用此时间解析明天、下周及相对时间。
 你可调用提供的工具；只在工具成功后报告已创建或已完成。查询本人数据应调用工具。
 模糊或缺失的日期、收件邮箱等必须先询问。联系人同名或未找到时不能编造地址。

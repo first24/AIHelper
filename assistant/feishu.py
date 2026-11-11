@@ -68,7 +68,15 @@ def run(config: Config, discover=False):
         raise ValueError("请先在 .env 配置 FEISHU_APP_ID 和 FEISHU_APP_SECRET")
     from .state import acquire_instance_lock
     instance_lock = acquire_instance_lock(config.db)
-    sender = FeishuSender(config.app_id, config.app_secret)
+    feishu_sender = FeishuSender(config.app_id, config.app_secret)
+    weixin_channel = None
+
+    def sender(chat, text, key):
+        if chat.startswith('weixin:'):
+            if weixin_channel is None:
+                raise RuntimeError('微信通道未启用')
+            return weixin_channel.send(chat, text, key)
+        return feishu_sender(chat, text, key)
     stop = threading.Event()
     general = os.getenv('ASSISTANT_MODE', 'general') == 'general'
     connection_status = {'connected': False}
@@ -104,6 +112,14 @@ def run(config: Config, discover=False):
             state.recover()
             zone = user_zone(os.getenv('ASSISTANT_TIMEZONE', 'Asia/Shanghai'))
             assistant = Assistant(config,state,DeepSeek(),Mailer(state),sender,zone,engine)
+            weixin_thread = None
+            if os.getenv('WEIXIN_ENABLED', '').lower() == 'true':
+                from .weixin import WeixinChannel
+                weixin_channel = WeixinChannel(config, state)
+                weixin_thread = threading.Thread(target=weixin_channel.run, args=(stop,),
+                                                 daemon=True, name='weixin-worker')
+                weixin_thread.start()
+                print('微信通道已启用；首次使用请运行 weixin-login 扫码绑定。', flush=True)
 
             def conversations():
                 while not stop.is_set():
@@ -122,6 +138,9 @@ def run(config: Config, discover=False):
                     try:
                         state.deliver(sender,time.time(),zone)
                         health={'updated_at':time.time(), 'conversation_worker_alive':conversation_thread.is_alive(), **connection_status}
+                        if weixin_channel:
+                            health['weixin_status'] = weixin_channel.status
+                            health['weixin_worker_alive'] = weixin_thread.is_alive()
                         temp = heartbeat.with_suffix('.tmp')
                         temp.write_text(json.dumps(health),encoding='utf-8')
                         os.replace(temp,heartbeat)
