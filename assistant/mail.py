@@ -6,6 +6,26 @@ import ssl
 from email.message import EmailMessage
 
 
+MAIL_STATUSES = {
+    'draft': '待发送',
+    'sending': '正在发送',
+    'sent': '已发送（SMTP 服务端已接受）',
+    'failed': '发送失败',
+    'unknown': '发送结果待核查',
+}
+
+
+def format_email(draft):
+    status = MAIL_STATUSES.get(draft['status'], draft['status'])
+    lines = [f"邮件 {draft['id']}", f"状态：{status}",
+             f"收件人：{draft['recipient']}", f"主题：{draft['subject']}", '', draft['body']]
+    if draft.get('detail'):
+        lines.extend(['', draft['detail']])
+    if draft['status'] in ('draft', 'failed'):
+        lines.extend(['', f"确认发送请回复：/发送邮件 {draft['id']}"])
+    return '\n'.join(lines)
+
+
 def address(value):
     if not isinstance(value, str) or len(value) > 254 or not re.fullmatch(r'[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', value):
         raise ValueError('请提供完整邮箱地址，不要只填写收件人姓名')

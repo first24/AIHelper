@@ -99,6 +99,8 @@ class State:
             body TEXT, status TEXT DEFAULT 'draft', detail TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS preferences (
             owner TEXT, key TEXT, value TEXT, PRIMARY KEY(owner,key));
+        CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY, owner TEXT, title TEXT, body TEXT, created REAL, updated REAL);
         CREATE TABLE IF NOT EXISTS effects (
             id TEXT PRIMARY KEY, result TEXT);
         ''')
