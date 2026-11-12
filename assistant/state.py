@@ -115,6 +115,14 @@ class State:
             run_url TEXT DEFAULT '', pr_url TEXT DEFAULT '', result TEXT DEFAULT '', notified INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS effects (
             id TEXT PRIMARY KEY, result TEXT);
+        CREATE TABLE IF NOT EXISTS codex_jobs (
+            id TEXT PRIMARY KEY, owner TEXT, chat TEXT, project TEXT, prompt TEXT,
+            parent_id TEXT DEFAULT '', status TEXT DEFAULT 'queued', created REAL,
+            started REAL DEFAULT 0, updated REAL, worker TEXT DEFAULT '', lease_hash TEXT DEFAULT '',
+            lease_until REAL DEFAULT 0, session_id TEXT DEFAULT '', result TEXT DEFAULT '',
+            workdir TEXT DEFAULT '', progress TEXT DEFAULT '', progress_at REAL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS codex_workers (
+            id TEXT PRIMARY KEY, last_seen REAL, busy TEXT DEFAULT '', version TEXT DEFAULT '');
         ''')
         draft_columns={row[1] for row in self.db.execute('PRAGMA table_info(drafts)')}
         for column in ('in_reply_to','references_header'):

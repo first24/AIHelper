@@ -1,5 +1,7 @@
 # AIHelper 第二版：飞书个人助理
 
+联网搜索、资讯订阅、QQ 收件箱与个人飞书日历见 [联网功能说明](CONNECTED.md)。微信／飞书指挥本机 Codex、任务状态与继续执行见 [本机 Codex 接入说明](CODEX.md)。
+
 通过飞书自然语言管理提醒、重复任务、待办、联系人、邮件草稿和每日简报，保留第一版已验证的 GitHub 代码修复。模型使用 DeepSeek，服务可用 Docker 在 Linux 云服务器常驻。
 
 项目提供完整源码、自动测试和部署配置，支持个人微信 ClawBot 与飞书同时使用。微信绑定方法见 [微信接入说明](docs/WEIXIN.md)，第一版真实修复记录见 [E2E-RESULT.md](E2E-RESULT.md)。
