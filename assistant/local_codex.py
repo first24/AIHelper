@@ -333,8 +333,23 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--config',required=True)
     parser.add_argument('--once',action='store_true')
+    parser.add_argument('--supervise',action='store_true')
     args=parser.parse_args()
     settings=json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
+    if args.supervise:
+        import sys
+        directory=Path(settings['data_dir'])
+        directory.mkdir(parents=True,exist_ok=True)
+        with open(directory/'worker.stdout.log','ab') as out,open(directory/'worker.stderr.log','ab') as err:
+            process=subprocess.Popen([sys.executable,'-m','assistant.local_codex','--config',str(Path(args.config).resolve())],
+                                     stdout=out,stderr=err,env={**os.environ,'PYTHONUTF8':'1'},
+                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0,
+                                     start_new_session=os.name!='nt')
+            tree=ProcessTree(process)
+            try:
+                raise SystemExit(process.wait())
+            finally:
+                tree.close()
     worker=Worker(settings)
     def stop(*args):
         worker.stop.set()
