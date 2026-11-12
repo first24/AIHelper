@@ -146,7 +146,7 @@ class Worker:
         project=self.settings['projects'][job['project']]
         if path.exists():
             raise ValueError('任务目录已存在，停止自动重跑，请先检查本机记录')
-        result=subprocess.run(['git','-C',project['source'],'worktree','add','--detach',str(path),project.get('ref','HEAD')],
+        result=subprocess.run(['git','-c','safe.directory='+str(Path(project['source']).resolve()),'-C',project['source'],'worktree','add','--detach',str(path),project.get('ref','HEAD')],
                               capture_output=True,timeout=60)
         if result.returncode:
             raise RuntimeError('无法为本机项目创建独立工作目录')
@@ -275,7 +275,7 @@ class Worker:
             record['status']='canceled' if canceled else ('done' if code==0 and completed and answer and not failure else 'failed')
             if record['status']!='done':
                 answer=(failure or ('用户已要求停止任务。' if canceled else last_error or 'Codex 未正常完成，请检查本机执行记录。'))+'\n'+answer[:6000]
-            change=subprocess.run(['git','status','--short'],cwd=directory,capture_output=True,encoding='utf-8',errors='replace',timeout=15)
+            change=subprocess.run(['git','-c','safe.directory='+str(directory),'status','--short'],cwd=directory,capture_output=True,encoding='utf-8',errors='replace',timeout=15)
             files=redact(change.stdout.strip())[:1800]
             record['result']=(answer+'\n\n本机工作目录：'+record['workdir']+('\n文件变更：\n'+files if files else '\n未产生文件变更。'))[:14000]
         except Exception as error:

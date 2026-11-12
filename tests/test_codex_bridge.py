@@ -94,6 +94,18 @@ class QueueTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_worktree_trust_is_limited_to_registered_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker=Worker.__new__(Worker)
+            worker.tasks=Path(directory)/'tasks'
+            worker.settings={'projects':{'aihelper':{'source':directory,'ref':'main'}}}
+            with patch('assistant.local_codex.subprocess.run',return_value=Mock(returncode=0)) as run:
+                worker.workdir({'id':'cx_test','project':'aihelper'}, {})
+            command=run.call_args.args[0]
+            self.assertIn('safe.directory='+str(Path(directory).resolve()),command)
+            self.assertNotIn('--global',command)
+            self.assertNotIn('safe.directory=*',command)
+
     def test_environment_does_not_inherit_service_credentials(self):
         with patch.dict(os.environ,{'GH_TOKEN':'secret','SMTP_AUTH_CODE':'secret','DEEPSEEK_API_KEY':'secret','CODEX_THREAD_ID':'original','USERPROFILE':'C:/test'}):
             environment=clean_env()
