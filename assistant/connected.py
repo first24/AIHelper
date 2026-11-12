@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta
 
 from .calendar import Calendar
+from .codex_jobs import CodexJobs
 from .inbox import Inbox
 from .mail import format_email
 from .projects import ProjectRepairs
@@ -20,8 +21,10 @@ class ConnectedServices:
         self.watch=InboxWatch(state,self.inbox,clock)
         self.calendar=Calendar(config,zone,clock)
         self.projects=ProjectRepairs(config,state,clock)
+        self.codex=CodexJobs(config,state,clock)
 
     def tick(self):
+        self.codex.expire()
         for service in (self.subscriptions,self.watch,self.projects):
             try:
                 service.tick()
@@ -31,6 +34,18 @@ class ConnectedServices:
     def execute(self,name,args,owner,chat,message_id,effect_id):
         if owner not in self.config.users:
             raise ValueError('当前用户未获授权')
+        if name=='start_codex_task':
+            if args.get('parent_id') and 'project' not in args:
+                args={**args,'project':self.codex.get(owner,args['parent_id'])['project']}
+            return self.codex.submit(owner,chat,message_id,**args)
+        if name=='get_codex_task':
+            return self.codex.get(owner,**args)
+        if name=='list_codex_tasks':
+            return self.codex.list(owner)
+        if name=='cancel_codex_task':
+            return self.codex.cancel(owner,**args)
+        if name=='get_codex_connection':
+            return self.codex.connection()
         if name=='web_search':
             return web_search(**args)
         if name=='read_webpage':
@@ -82,12 +97,15 @@ class ConnectedServices:
         raise ValueError('未知联网工具')
 
     def command(self,text,tools):
-        simple={'/订阅':('list_subscriptions',{}),'/代码仓库':('list_project_repositories',{}),'/连接状态':('get_connected_status',{}),
+        simple={'/codex':('list_codex_tasks',{}),'/codex任务':('list_codex_tasks',{}),'/codex连接':('get_codex_connection',{}),
+                '/订阅':('list_subscriptions',{}),'/代码仓库':('list_project_repositories',{}),'/连接状态':('get_connected_status',{}),
                 '/收件箱':('list_inbox_emails',{}),'/收件箱 全部':('list_inbox_emails',{'unread_only':False}),
                 '/新邮件通知 开':('set_inbox_watch',{'enabled':True}),'/新邮件通知 关':('set_inbox_watch',{'enabled':False})}
         if text in ('/日历','/空闲'):
             start=datetime.fromtimestamp(self.clock(),self.zone).replace(hour=0,minute=0,second=0,microsecond=0)
             simple[text]=('list_calendar_events' if text=='/日历' else 'find_calendar_slots',{'start':start.isoformat(),'end':(start+timedelta(days=1)).isoformat()})
+        if text=='/codex项目':
+            return '\n'.join(key+'｜'+label for key,label in self.codex.projects().items()) or '尚未接入本机项目。'
         if text in simple:
             name,args=simple[text]
         else:
@@ -95,11 +113,17 @@ class ConnectedServices:
             if len(parts)!=2:
                 return None
             cmd,value=parts
-            mapping={'/搜索':('web_search','query'),'/网页':('read_webpage','url'),'/读邮件':('get_inbox_email','id'),
+            mapping={'/codex':('start_codex_task','prompt'),'/codex状态':('get_codex_task','id'),'/codex取消':('cancel_codex_task','id'),
+                     '/搜索':('web_search','query'),'/网页':('read_webpage','url'),'/读邮件':('get_inbox_email','id'),
                      '/运行订阅':('run_subscription','id'),'/项目状态':('get_project_repair','id')}
             if cmd in mapping:
                 name,key=mapping[cmd]
                 args={key:value}
+            elif cmd=='/codex继续':
+                follow=value.split(maxsplit=1)
+                if len(follow)!=2:
+                    return '用法：/codex继续 cx_任务编号 后续要求'
+                name,args='start_codex_task',{'parent_id':follow[0],'prompt':follow[1]}
             elif cmd in ('/暂停订阅','/恢复订阅','/取消订阅'):
                 name='manage_subscription'
                 args={'id':value,'action':{'/暂停订阅':'pause','/恢复订阅':'resume','/取消订阅':'cancel'}[cmd]}
