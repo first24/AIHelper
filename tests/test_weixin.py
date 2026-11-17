@@ -78,6 +78,7 @@ class WeixinTests(unittest.TestCase):
         self.channel.ingest(self.account, self.update())
         self.channel.drain(self.account)
         self.assertEqual(len(self.state.rows('SELECT * FROM messages_v2')), 1)
+        self.assertEqual(len(self.state.rows("SELECT * FROM memory_events WHERE kind='user'")), 1)
         self.assertEqual(self.state.rows('SELECT cursor FROM weixin_sync')[0]['cursor'], 'cursor-1')
         self.assertEqual(self.state.rows('SELECT token FROM weixin_context')[0]['token'], 'private-context')
 

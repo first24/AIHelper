@@ -71,7 +71,8 @@ def next_due(previous, now, repeat, zone):
 
 
 class State:
-    def __init__(self, path):
+    def __init__(self, path, memory_settings=None):
+        self.path = str(path)
         if path != ':memory:':
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=20, check_same_thread=False)
@@ -115,12 +116,32 @@ class State:
             run_url TEXT DEFAULT '', pr_url TEXT DEFAULT '', result TEXT DEFAULT '', notified INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS effects (
             id TEXT PRIMARY KEY, result TEXT);
+        CREATE TABLE IF NOT EXISTS codex_jobs (
+            id TEXT PRIMARY KEY, owner TEXT, chat TEXT, project TEXT, prompt TEXT,
+            parent_id TEXT DEFAULT '', status TEXT DEFAULT 'queued', created REAL,
+            started REAL DEFAULT 0, updated REAL, worker TEXT DEFAULT '', lease_hash TEXT DEFAULT '',
+            lease_until REAL DEFAULT 0, session_id TEXT DEFAULT '', result TEXT DEFAULT '',
+            workdir TEXT DEFAULT '', progress TEXT DEFAULT '', progress_at REAL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS codex_workers (
+            id TEXT PRIMARY KEY, last_seen REAL, busy TEXT DEFAULT '', version TEXT DEFAULT '');
         ''')
         draft_columns={row[1] for row in self.db.execute('PRAGMA table_info(drafts)')}
         for column in ('in_reply_to','references_header'):
             if column not in draft_columns:
                 self.db.execute('ALTER TABLE drafts ADD COLUMN '+column+" TEXT DEFAULT ''")
         self.db.commit()
+        from .memory_types import MemorySettings
+        from .migrations import migrate
+        from .memory_store import MemoryStore
+        self.memory_settings = memory_settings or MemorySettings.from_env()
+        try:
+            migrate(self)
+            self.memory = MemoryStore(self)
+            self.memory.import_legacy()
+            self.memory.apply_deletion_ledger()
+        except BaseException:
+            self.db.close()
+            raise
 
     @contextmanager
     def transaction(self):
@@ -143,6 +164,10 @@ class State:
 
     def recover(self):
         with self.transaction() as db:
+            for row in list(db.execute("SELECT t.id FROM memory_turns t JOIN messages_v2 m ON t.input_message_id=m.id WHERE m.status='processing' AND t.status='processing'")):
+                self.memory.append(db, row['id'], 'interrupted', 'metadata', 'interrupted',
+                                   {'status': 'unknown', 'notice': '处理曾中断；没有结果的工具调用不可自动重放，请查询业务状态。'})
+                self.memory.finish(db, row['id'], '上次处理被重启中断，已完成的操作需查询核实。', 'interrupted')
             db.execute("UPDATE messages_v2 SET status='ready', reply='上次处理被服务重启中断。请重新发送请求；已有任务可通过 /提醒、/待办、/草稿 查询。' WHERE status='processing'")
             db.execute("UPDATE drafts SET status='unknown',detail='发送期间服务重启，结果需核查，未自动重发' WHERE status='sending'")
             db.execute("UPDATE deliveries SET status='pending' WHERE status='sending'")
@@ -153,8 +178,11 @@ class State:
                 return False
             if db.execute("SELECT count(*) FROM messages_v2 WHERE status IN ('queued','processing')").fetchone()[0] >= 30:
                 raise ValueError('当前队列已满，请稍后重试')
+            created = time.time()
             db.execute("INSERT INTO messages_v2(id,owner,chat,text,status,created) VALUES(?,?,?,?,'queued',?)",
-                       (message_id, owner, chat, text, time.time()))
+                       (message_id, owner, chat, text, created))
+            if self.memory_settings.archive_write:
+                self.memory.begin(db, message_id, owner, chat, text, created)
             return True
 
     def claim_message(self):
@@ -162,12 +190,17 @@ class State:
             row = db.execute("SELECT * FROM messages_v2 WHERE status='queued' ORDER BY created,id LIMIT 1").fetchone()
             if not row:
                 return None
+            self.memory.rebind_queued(db,row['id'],row['owner'],row['chat'])
             db.execute("UPDATE messages_v2 SET status='processing' WHERE id=?", (row['id'],))
             return dict(row)
 
     def history(self, owner, chat):
-        rows = self.rows('SELECT body FROM turns WHERE owner=? AND chat=? ORDER BY id DESC LIMIT 6', (owner, chat))
-        return [message for row in reversed(rows) for message in json.loads(row['body'])]
+        # Public legacy callers also pass through visibility and epoch filtering.
+        from .memory_context import replay
+        with self.transaction() as db:
+            session = self.memory.session(db, owner, chat)
+            rows = list(db.execute("SELECT id FROM memory_turns WHERE session_id=? AND visible=1 AND status!='processing' ORDER BY last_seq DESC LIMIT 6", (session['id'],)))
+            return [message for row in reversed(rows) for message in replay(self.memory.events(owner, row['id'], db))]
 
     def save_turn(self, owner, chat, messages):
         with self.transaction() as db:
