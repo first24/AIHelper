@@ -22,14 +22,20 @@ class ConnectedServices:
         self.calendar=Calendar(config,zone,clock)
         self.projects=ProjectRepairs(config,state,clock)
         self.codex=CodexJobs(config,state,clock)
+        from .memory_jobs import MemoryJobs
+        self.memory_jobs=MemoryJobs(state,model,clock=clock)
+        self._memory_maintenance_at=0
 
     def tick(self):
         self.codex.expire()
-        for service in (self.subscriptions,self.watch,self.projects):
+        for service in (self.subscriptions,self.watch,self.projects,self.memory_jobs):
             try:
                 service.tick()
             except Exception as error:
                 print(type(service).__name__+' 待重试：'+type(error).__name__,flush=True)
+        if self.clock()>=self._memory_maintenance_at:
+            self.memory_jobs.maintain()
+            self._memory_maintenance_at=self.clock()+3600
 
     def execute(self,name,args,owner,chat,message_id,effect_id):
         if owner not in self.config.users:

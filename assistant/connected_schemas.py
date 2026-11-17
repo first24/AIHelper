@@ -4,7 +4,9 @@ from .schemas import AT,ID,REPEAT,spec,string
 EXTRA_SPECS=[
     spec('start_codex_task','按用户要求将任务交给本机 Codex。用于本机项目分析、修改和测试，异步执行并回报；只有已接入的项目可用。parent_id 可继续本人已结束的原任务会话。',
          {'prompt':string('用户交给 Codex 的完整任务要求',6000),'project':string('已接入的本机项目代号',40),
-          'parent_id':ID},['prompt']),
+          'parent_id':ID,'evidence_id':string('仅用户明确选择的相关证据编号，不附全部历史',64),
+          'evidence_version':{'type':'integer','minimum':1,'maximum':2147483647},
+          'evidence_scope':string('证据范围，跨会话需用户明确回溯',enum=['current_session','owner_history'])},['prompt']),
     spec('get_codex_task','查询本人 Codex 任务状态和最终结果。',{'id':ID},['id']),
     spec('list_codex_tasks','查询本人最近的 Codex 任务。'),
     spec('cancel_codex_task','仅在用户要求时取消本人指定排队任务，或请求停止正在执行的本机 Codex 任务。已产生文件保留。',{'id':ID},['id']),

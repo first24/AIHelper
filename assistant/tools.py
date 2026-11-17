@@ -8,6 +8,7 @@ from .mail import MAIL_STATUSES, address, format_email
 from .state import parse_at
 from .schemas import AT,ID,REPEAT,spec,string
 from .connected_schemas import EXTRA_NAMES,EXTRA_SPECS
+from .memory_tools import MEMORY_NAMES, MEMORY_READ_ONLY, MEMORY_SPECS, MemoryTools, explicit_save
 SPECS = [
     spec('create_reminder', '保存提醒。先明确内容和未来执行时间，再创建；返回真实编号和时间。',
          {'text': string('提醒内容', 1000), 'at': AT, 'repeat': REPEAT}, ['text','at']),
@@ -44,11 +45,22 @@ SPECS = [
     spec('schedule_daily_brief', '按指定未来时间定期在当前聊天向本人汇总未完成待办，内容不需要再次调用模型。',
          {'at':AT,'repeat':REPEAT}, ['at']),
     spec('remember_preference', '仅在用户要求记住偏好时保存，不保存密钥、密码或授权码。',
-         {'key':string('偏好名称',enum=['language','email_signature','brief_style']), 'value':string('偏好值',500)}, ['key','value']),
+         {'key':string('偏好名称',enum=['language','email_signature','brief_style']), 'value':string('偏好值',500),
+          'expected_version':{'type':'integer','minimum':0,'maximum':2147483647}}, ['key','value']),
     spec('start_code_repair', '触发原有 GitHub 演示代码修复，仅支持 demo_shop/pricing.py。',
          {'problem':string('完整问题描述',3000)}, ['problem']),
 ]
 SPECS+=EXTRA_SPECS
+SPECS+=MEMORY_SPECS
+# Explicit metadata replaces the old prefix-only caching decision. Memory reads
+# must never be cached as mutations (notably search_history/read_history_evidence).
+READ_ONLY = {'list_reminders','get_daily_overview','list_todos','find_contact','list_email_drafts','get_email_draft',
+             'list_notes','get_note','get_codex_task','list_codex_tasks','get_codex_connection','web_search','read_webpage',
+             'list_subscriptions','list_inbox_emails','get_inbox_email','list_calendar_events','find_calendar_slots',
+             'list_project_repositories','get_project_repair','get_connected_status'} | MEMORY_READ_ONLY
+TOOL_METADATA = {s['function']['name']: {'read_only': s['function']['name'] in READ_ONLY,
+                 'cache_policy': 'none' if s['function']['name'] in READ_ONLY else 'effect',
+                 'mutation_kind': 'memory' if s['function']['name'] in MEMORY_NAMES else 'business'} for s in SPECS}
 
 
 def validate(name, args):
@@ -78,10 +90,29 @@ class Tools:
         self.state, self.owner, self.chat = state, owner, chat
         self.message_id, self.zone, self.legacy, self.clock = message_id, zone, legacy, clock
         self.services=services
+        self.trace_call_id = ''
+        self.trace_step = 0
+        self.last_event_id = None
+        rows = state.rows('SELECT text FROM messages_v2 WHERE id=? AND owner=? AND chat=?', (message_id, owner, chat))
+        self.request_text = rows[0]['text'] if rows else ''
 
     def execute(self, name, args):
         validate(name, args)
-        effect_id = hashlib.sha256((self.message_id + name + json.dumps(args,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()[:16]
+        self.trace_step += 1
+        key = 'tool:' + str(self.trace_step) + ':' + name
+        self.state.memory.tool_event(self.owner, self.chat, self.message_id, key + ':start', name, args, call_id=self.trace_call_id)
+        try:
+            result = self._execute(name, args)
+        except Exception as error:
+            self.last_event_id = self.state.memory.tool_event(self.owner, self.chat, self.message_id, key + ':result', name, args,
+                {'ok': False, 'error': str(error) if isinstance(error, ValueError) else type(error).__name__}, self.trace_call_id, error=True)
+            raise
+        self.last_event_id = self.state.memory.tool_event(self.owner, self.chat, self.message_id, key + ':result', name, args, result, self.trace_call_id,
+                                                         error=result.get('ok') is False)
+        return result
+
+    def _execute(self, name, args):
+        effect_id = hashlib.sha256(json.dumps(['v2',self.owner,self.chat,self.message_id,name,args],sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
         cached = self.state.rows('SELECT result FROM effects WHERE id=?', (effect_id,))
         if cached:
             return json.loads(cached[0]['result'])
@@ -95,14 +126,31 @@ class Tools:
                     'save_note':self.save_note,'list_notes':self.list_notes,'get_note':self.get_note,
                     'update_note':self.update_note,'delete_note':self.delete_note,
                     'remember_preference':self.remember_preference,'start_code_repair':self.start_code_repair}
-        if name in EXTRA_NAMES:
+        if name in MEMORY_NAMES:
+            result = MemoryTools(self).execute(name, args)
+        elif name in EXTRA_NAMES:
             if self.services is None:
                 raise ValueError('联网扩展尚未启动，请检查助理运行配置')
             result=self.services.execute(name,args,self.owner,self.chat,self.message_id,effect_id)
         else:
             result = handlers[name](effect_id=effect_id, **args)
-        if not name.startswith(('list_', 'find_', 'get_')) and name not in ('web_search','read_webpage'):
-            self.state.execute('INSERT OR IGNORE INTO effects(id,result) VALUES(?,?)', (effect_id,json.dumps(result,ensure_ascii=False)))
+        if not TOOL_METADATA[name]['read_only']:
+            # Deletion receipts contain no forgotten content. Keep effect IDs so
+            # clearing private copies cannot cause writes to execute again.
+            refs=[]
+            if name in ('save_note','update_note','delete_note'):
+                refs.append(('note',result.get('id') or args.get('id')))
+            elif name=='remember_preference':
+                refs.append(('preference',args['key']))
+            elif name in ('save_memory','update_memory','forget_memory'):
+                identity=result.get('id') or args.get('id')
+                refs.append(('preference',identity[5:]) if identity and identity.startswith('pref:') else ('item',identity))
+            with self.state.transaction() as db:
+                db.execute('INSERT OR IGNORE INTO effects(id,result) VALUES(?,?)',(effect_id,json.dumps(result,ensure_ascii=False)))
+                db.execute('INSERT OR IGNORE INTO memory_effects VALUES(?,?,?)',(effect_id,self.owner,self.message_id))
+                for kind,identity in refs:
+                    if identity:
+                        self.state.memory.link(db,self.owner,'effect',effect_id,kind,identity)
         return result
 
     def format_due(self, stamp):
@@ -311,8 +359,11 @@ class Tools:
     def save_note(self,title,body,effect_id=''):
         note_id='n_'+effect_id
         now=self.clock()
-        self.state.execute('INSERT OR IGNORE INTO notes(id,owner,title,body,created,updated) VALUES(?,?,?,?,?,?)',
-                           (note_id,self.owner,title,body,now,now))
+        with self.state.transaction() as db:
+            db.execute('INSERT OR IGNORE INTO notes(id,owner,title,body,created,updated) VALUES(?,?,?,?,?,?)',
+                       (note_id,self.owner,title,body,now,now))
+            row = dict(db.execute('SELECT * FROM notes WHERE id=? AND owner=?', (note_id,self.owner)).fetchone())
+            self.state.memory.source(db,self.owner,'note',note_id,row,now)
         return {'ok':True,'id':note_id,'receipt':f'已保存随手记 {note_id}：{title}'}
 
     def list_notes(self,query='',effect_id=''):
@@ -347,19 +398,31 @@ class Tools:
                 raise ValueError('未找到你的随手记')
             db.execute('UPDATE notes SET title=?,body=?,updated=? WHERE id=? AND owner=?',
                        (title if title is not None else row['title'],body if body is not None else row['body'],self.clock(),id,self.owner))
+            source = dict(db.execute('SELECT * FROM notes WHERE id=? AND owner=?', (id,self.owner)).fetchone())
+            self.state.memory.source(db,self.owner,'note',id,source,self.clock())
         result=self.get_note(id)
         result['receipt']='已更新'+result['receipt']
         return result
 
     def delete_note(self,id,effect_id=''):
-        changed=self.state.execute('DELETE FROM notes WHERE id=? AND owner=?',(id,self.owner))
-        if not changed:
-            raise ValueError('未找到你的随手记')
-        return {'ok':True,'receipt':'已删除随手记 '+id}
+        with self.state.transaction() as db:
+            if not db.execute('DELETE FROM notes WHERE id=? AND owner=?',(id,self.owner)).rowcount:
+                raise ValueError('未找到你的随手记')
+            self.state.memory.tombstone(db,self.owner,'note',id)
+            self.state.memory.invalidate_source(db,self.owner,'note',id)
+        return {'ok':True,'memory_reset':True,'receipt':'已删除随手记 '+id+'，相关记忆副本已停止使用。备份和本机产物未删除。'}
 
-    def remember_preference(self,key,value,effect_id=''):
-        self.state.execute('INSERT INTO preferences(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) DO UPDATE SET value=excluded.value',(self.owner,key,value))
-        return {'ok':True,'receipt':f'已保存偏好：{key}={value}'}
+    def remember_preference(self,key,value,effect_id='',expected_version=None):
+        from .memory_types import MemoryConflict
+        if self.request_text and not (explicit_save(self.request_text) or ('偏好' in self.request_text and any(word in self.request_text for word in ('修改','改成','更新')))):
+            raise ValueError('仅在用户明确要求长期记住时保存偏好；本次例外不覆盖偏好')
+        with self.state.transaction() as db:
+            old = db.execute("SELECT version FROM memory_source_revisions WHERE owner=? AND kind='preference' AND id=? AND status='active'", (self.owner,key)).fetchone()
+            if old and expected_version != old['version']:
+                raise MemoryConflict('偏好版本冲突或缺少版本，请先 get_preference_history；当前版本 '+str(old['version']))
+            version=self.state.memory.source(db,self.owner,'preference',key,{'key':key,'value':value},self.clock())
+            db.execute('INSERT INTO preferences(owner,key,value) VALUES(?,?,?) ON CONFLICT(owner,key) DO UPDATE SET value=excluded.value',(self.owner,key,value))
+        return {'ok':True,'id':'pref:'+key,'version':version,'receipt':f'已保存偏好：{key}={value}（版本 {version}）'}
 
     def start_code_repair(self,problem,effect_id=''):
         if self.legacy is None:

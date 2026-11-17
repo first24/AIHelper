@@ -21,13 +21,19 @@ class CodexJobs:
             raise ValueError('Codex 项目配置无效')
         return value
 
-    def submit(self,owner,chat,message_id,prompt,project='aihelper',parent_id=''):
+    def submit(self,owner,chat,message_id,prompt,project='aihelper',parent_id='',evidence_id='',evidence_version=1,evidence_scope='current_session'):
         if owner not in self.config.users:
             raise ValueError('当前用户未获授权')
         if project not in self.projects():
             raise ValueError('本机项目未接入，请先查询 /codex项目')
         if not isinstance(prompt,str) or not 1<=len(prompt.strip())<=6000:
             raise ValueError('Codex 任务需要 1–6000 字的明确说明')
+        if evidence_id:
+            from .memory_handoff import authorized_reference
+            rows=self.state.rows('SELECT text FROM messages_v2 WHERE id=? AND owner=? AND chat=?',(message_id,owner,chat))
+            authorized_reference(self.state,owner,chat,rows[0]['text'] if rows else prompt,evidence_id,evidence_version,evidence_scope)
+            if len(prompt)>5500:
+                raise ValueError('带背景的任务请将原始说明缩至 5500 字以内，保留必要约束')
         job_id='cx_'+hashlib.sha256(('codex:'+message_id).encode()).hexdigest()[:16]
         with self.state.transaction() as db:
             previous=db.execute('SELECT id FROM codex_jobs WHERE id=? AND owner=?',(job_id,owner)).fetchone()
@@ -44,6 +50,9 @@ class CodexJobs:
             now=self.clock()
             db.execute('INSERT INTO codex_jobs(id,owner,chat,project,prompt,parent_id,created,updated) VALUES(?,?,?,?,?,?,?,?)',
                        (job_id,owner,chat,project,prompt.strip(),parent_id,now,now))
+            if evidence_id:
+                generation=self.state.memory.owner(db,owner)['generation']
+                db.execute('INSERT INTO memory_handoffs VALUES(?,?,?,?,?,?,?)',(job_id,owner,chat,evidence_id,evidence_version,evidence_scope,generation))
         return {'ok':True,'id':job_id,'receipt':f'已提交本机 Codex 任务 {job_id}\n项目：{self.projects()[project]}\n电脑开机且执行端在线后开始，结果会回到当前聊天。\n查询：/codex状态 {job_id}'}
 
     def get(self,owner,id):
@@ -109,6 +118,8 @@ class CodexJobs:
             db.execute('UPDATE codex_workers SET busy=? WHERE id=?',(row['id'],worker))
             self._notice(db,row,'started','本机 Codex 已开始：'+row['id'])
             job={key:row[key] for key in ('id','project','prompt','parent_id')}
+            from .memory_handoff import task_prompt
+            job['prompt']=task_prompt(self.state,db,row)
             job['lease']=token
             if row['parent_id']:
                 parent=db.execute('SELECT session_id,workdir FROM codex_jobs WHERE id=?',(row['parent_id'],)).fetchone()
